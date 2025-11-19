@@ -139,7 +139,7 @@ jobs:
       #######################################################################
       - name: Install Visual Studio Code
         run: |
-          $url = "https://aka.ms/win32-x64-user-stable"
+          $url = "https://update.code.visualstudio.com/latest/win32-x64/stable"
           $installer = "$env:TEMP\vscode.exe"
 
           Invoke-WebRequest -Uri $url -OutFile $installer
@@ -147,7 +147,6 @@ jobs:
           Start-Process $installer -ArgumentList "/verysilent /suppressmsgboxes /norestart" -Wait
 
           Remove-Item $installer -Force
-
 
       #######################################################################
       # CREATE SHORTCUTS
