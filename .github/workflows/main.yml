@@ -35,14 +35,12 @@ jobs:
           $password = "Zain.rty123"
           $secure = ConvertTo-SecureString $password -AsPlainText -Force
 
-          # Create user if not exists
           if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
             New-LocalUser -Name $username -Password $secure -AccountNeverExpires
           } else {
             Set-LocalUser -Name $username -Password $secure
           }
 
-          # Add to admin groups
           Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
 
@@ -56,7 +54,6 @@ jobs:
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $out = "$env:TEMP\tailscale.msi"
-
           Invoke-WebRequest -Uri $url -OutFile $out
           Start-Process msiexec.exe -ArgumentList "/i `"$out`" /quiet /norestart" -Wait
           Remove-Item $out
@@ -64,17 +61,13 @@ jobs:
       - name: Establish Tailscale Connection
         run: |
           $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=runner-$env:GITHUB_RUN_ID
-
           $tsIP = $null
           for ($i=0; $i -lt 10 -and -not $tsIP; $i++){
             $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
             Start-Sleep 5
           }
-
           if (-not $tsIP) { throw "Tailscale IP not assigned." }
-
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       #######################################################################
@@ -110,7 +103,6 @@ jobs:
           New-Item -ItemType Directory -Path $extractPath | Out-Null
 
           & $sevenZip x $downloadPath "-o$extractPath" -y
-
           Copy-Item "$extractPath\*" $desktopPath -Recurse -Force
 
           Remove-Item $downloadPath -Force
@@ -125,28 +117,24 @@ jobs:
           $installer = "$env:TEMP\python3133.exe"
 
           Invoke-WebRequest -Uri $pythonUrl -OutFile $installer
-
           Start-Process -FilePath $installer -ArgumentList `
             "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_launcher=1" `
             -Wait
-
           Remove-Item $installer -Force
-
           python --version
 
       #######################################################################
-      # INSTALL VISUAL STUDIO CODE (SYSTEM-WIDE)
+      # INSTALL VS CODE (PORTABLE)
       #######################################################################
-      - name: Install Visual Studio Code
+      - name: Install VS Code (Portable)
         run: |
-          $url = "https://update.code.visualstudio.com/latest/win32-x64/stable"
-          $installer = "$env:TEMP\vscode.exe"
+          $url = "https://update.code.visualstudio.com/latest/win32-x64-archive/stable"
+          $zipPath = "$env:TEMP\vscode.zip"
+          $extractPath = "C:\Users\rdpadmin\VSCode"
 
-          Invoke-WebRequest -Uri $url -OutFile $installer
-
-          Start-Process $installer -ArgumentList "/verysilent /suppressmsgboxes /norestart" -Wait
-
-          Remove-Item $installer -Force
+          Invoke-WebRequest -Uri $url -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          Remove-Item $zipPath -Force
 
       #######################################################################
       # CREATE SHORTCUTS
@@ -163,7 +151,7 @@ jobs:
 
           # VS Code Shortcut
           $vs = $WshShell.CreateShortcut("$desktop\VS Code.lnk")
-          $vs.TargetPath = "C:\Program Files\Microsoft VS Code\Code.exe"
+          $vs.TargetPath = "C:\Users\rdpadmin\VSCode\Code.exe"
           $vs.Save()
 
       #######################################################################
