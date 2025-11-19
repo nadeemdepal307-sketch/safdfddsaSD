@@ -46,14 +46,23 @@ jobs:
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
       #######################################################################
-      # CREATE DESKTOP FOLDER FOR rdpadmin
+      # FORCE CREATE USER PROFILE + DESKTOP
       #######################################################################
-      - name: Create Desktop Folder
+      - name: Force Create User Profile and Desktop
         run: |
-          $profile = "C:\Users\rdpadmin"
-          $desktop = "$profile\Desktop"
-          if (-not (Test-Path $profile)) { New-Item -ItemType Directory -Path $profile | Out-Null }
-          if (-not (Test-Path $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }
+          $user = "rdpadmin"
+          $userProfile = "C:\Users\$user"
+
+          if (-not (Test-Path $userProfile)) {
+            Write-Host "Forcing Windows to create profile..."
+            runas /user:$user "cmd /c exit" 2>$null
+            Start-Sleep -Seconds 5
+          }
+
+          $desktop = "$userProfile\Desktop"
+          if (-not (Test-Path $desktop)) {
+            New-Item -ItemType Directory -Path $desktop | Out-Null
+          }
 
       #######################################################################
       # INSTALL TAILSCALE
@@ -89,7 +98,7 @@ jobs:
           Write-Host "RDP port is open."
 
       #######################################################################
-      # DOWNLOAD AND EXTRACT SOFTWARES TO RDP DESKTOP
+      # DOWNLOAD SOFTWARE → PLACE ON DESKTOP
       #######################################################################
       - name: Download and Extract SOFTWARES
         run: |
@@ -131,16 +140,16 @@ jobs:
           python --version
 
       #######################################################################
-      # INSTALL VS CODE (PORTABLE)
+      # INSTALL VS CODE → ON DESKTOP
       #######################################################################
-      - name: Install VS Code (Portable)
+      - name: Install VS Code Portable to Desktop
         run: |
           $url = "https://update.code.visualstudio.com/latest/win32-x64-archive/stable"
           $zipPath = "$env:TEMP\vscode.zip"
-          $extractPath = "C:\Users\rdpadmin\VSCode"
+          $desktop = "C:\Users\rdpadmin\Desktop\VSCode"
 
           Invoke-WebRequest -Uri $url -OutFile $zipPath
-          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          Expand-Archive -Path $zipPath -DestinationPath $desktop -Force
           Remove-Item $zipPath -Force
 
       #######################################################################
@@ -158,11 +167,11 @@ jobs:
 
           # VS Code Shortcut
           $vs = $WshShell.CreateShortcut("$desktop\VS Code.lnk")
-          $vs.TargetPath = "C:\Users\rdpadmin\VSCode\Code.exe"
+          $vs.TargetPath = "C:\Users\rdpadmin\Desktop\VSCode\Code.exe"
           $vs.Save()
 
       #######################################################################
-      # KEEP RUNNER ALIVE
+      # KEEP RDP SESSION
       #######################################################################
       - name: Maintain RDP Connection
         run: |
