@@ -1,205 +1,150 @@
 name: RDP Setup and Software Installation
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Trigger manually
 
 jobs:
   setup-rdp:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 3600  # Set the maximum job time (6 hours)
 
     steps:
 
       - name: Checkout Repository
         uses: actions/checkout@v2
 
-      #######################################################################
-      # ENABLE RDP + OPEN FIREWALL + DISABLE NLA
-      #######################################################################
       - name: Configure Core RDP Settings
         run: |
-          Write-Host "==> Configuring RDP settings..."
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          # Enable Remote Desktop and disable Network Level Authentication
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+          # Open firewall for RDP on port 3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+          # Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
-          Write-Host "==> RDP configured and firewall updated."
-
-      #######################################################################
-      # CREATE RDP USER
-      #######################################################################
-      - name: Create RDP User
+      - name: Create RDP User with Fixed Password
         run: |
-          $username = "rdpadmin"
-          $password = "Zain.rty123"
-          Write-Host "==> Creating or updating user $username..."
-          $secure = ConvertTo-SecureString $password -AsPlainText -Force
-
-          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-            Write-Host "User does not exist. Creating..."
-            New-LocalUser -Name $username -Password $secure -AccountNeverExpires
+          # Use a fixed RDP password as requested
+          $password = 'Zain.rty123'
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          # Create the RDP user (if it already exists, update the password)
+          if (Get-LocalUser -Name "Administrator" -ErrorAction SilentlyContinue) {
+              # Set the password for existing user
+              Set-LocalUser -Name "Administrator" -Password $securePass
           } else {
-            Write-Host "User exists. Updating password..."
-            Set-LocalUser -Name $username -Password $secure
+              New-LocalUser -Name "Administrator" -Password $securePass -AccountNeverExpires
           }
-
-          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
-
-          echo "RDP_USER=$username" >> $env:GITHUB_ENV
-          echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
-          Write-Host "==> User setup complete."
-
-      #######################################################################
-      # PREPARE DESKTOP FOLDER
-      #######################################################################
-      - name: Prepare Desktop Folder for rdpadmin
-        run: |
-          Write-Host "==> Preparing Desktop folder..."
-          $user = "rdpadmin"
-          $profile = "C:\Users\$user"
-          $desktop = "$profile\Desktop"
-
-          if (-not (Test-Path $profile)) {
-            Write-Host "Profile folder not found. Creating..."
-            New-Item -ItemType Directory -Path $profile | Out-Null
+          # Ensure group memberships
+          if (-not (Get-LocalGroupMember -Group "Administrators" -Member "Administrator" -ErrorAction SilentlyContinue)) {
+              Add-LocalGroupMember -Group "Administrators" -Member "Administrator"
           }
-          if (-not (Test-Path $desktop)) {
-            Write-Host "Desktop folder not found. Creating..."
-            New-Item -ItemType Directory -Path $desktop | Out-Null
+          if (-not (Get-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator" -ErrorAction SilentlyContinue)) {
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator"
           }
-          Write-Host "==> Desktop folder ready."
-
-      #######################################################################
-      # INSTALL TAILSCALE
-      #######################################################################
+          # Output the credentials to GitHub environment for later use
+          echo "RDP_CREDS=User: Administrator | Password: $password" >> $env:GITHUB_ENV
+          if (-not (Get-LocalUser -Name "Administrator")) {
+              Write-Error "User creation or update failed"
+              exit 1
+          }
       - name: Install Tailscale
         run: |
-          Write-Host "==> Downloading Tailscale..."
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $out = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $url -OutFile $out
-          Write-Host "==> Installing Tailscale..."
-          Start-Process msiexec.exe -ArgumentList "/i `"$out`" /quiet /norestart" -Wait
-          Remove-Item $out
-          Write-Host "==> Tailscale installed."
-
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
       - name: Establish Tailscale Connection
         run: |
-          Write-Host "==> Establishing Tailscale connection..."
+          # Get the Tailscale Auth Key from GitHub Secrets
           $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=runner-$env:GITHUB_RUN_ID
-
+          
+          # Log in to Tailscale using the provided auth key and set a unique hostname
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID
+          # Wait for Tailscale to assign an IP
           $tsIP = $null
-          for ($i=0; $i -lt 10 -and -not $tsIP; $i++){
-            Write-Host "Waiting for Tailscale IP... attempt $($i+1)"
-            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-            Start-Sleep 5
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
           }
-
-          if (-not $tsIP) { throw "Tailscale IP not assigned." }
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-          Write-Host "==> Tailscale connected: $tsIP"
-
-      #######################################################################
-      # VERIFY RDP
-      #######################################################################
       - name: Verify RDP Accessibility
         run: |
-          Write-Host "==> Verifying RDP port..."
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          $test = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $test.TcpTestSucceeded) { throw "RDP port failed." }
-          Write-Host "==> RDP port is open."
-
-      #######################################################################
-      # DOWNLOAD AND EXTRACT SOFTWARES TO DESKTOP
-      #######################################################################
-      - name: Download and Extract SOFTWARES
-        run: |
-          Write-Host "==> Downloading sOFTWARES.rar..."
-          $downloadUrl = "https://github.com/Zaiinalii/RDP/releases/download/v1/sOFTWARES.rar"
-          $desktop = "C:\Users\rdpadmin\Desktop"
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          $zipTemp = "$env:TEMP\sOFTWARES.rar"
-
-          Invoke-WebRequest -Uri $downloadUrl -OutFile $zipTemp
-          Write-Host "==> Download complete."
-
-          if (-not (Test-Path $sevenZip)) {
-            Write-Host "==> Installing 7-Zip..."
-            Invoke-WebRequest "https://www.7-zip.org/a/7z1900-x64.exe" -OutFile "$env:TEMP\7z.exe"
-            Start-Process "$env:TEMP\7z.exe" -ArgumentList "/S" -Wait
+          
+          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
+          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
           }
-
-          Write-Host "==> Extracting archive directly to Desktop..."
-          & $sevenZip x $zipTemp "-o$desktop" -y -bb3
-          Remove-Item $zipTemp -Force
-          Write-Host "==> Extraction complete."
-
-      #######################################################################
-      # INSTALL PYTHON 3.13.3
-      #######################################################################
-      - name: Install Python 3.13.3
+          Write-Host "TCP connectivity successful!"
+      - name: Download and Extract sOFTWARES
         run: |
-          Write-Host "==> Installing Python 3.13.3..."
-          $pythonUrl = "https://www.python.org/ftp/python/3.13.3/python-3.13.3-amd64.exe"
-          $installer = "$env:TEMP\python3133.exe"
-          Invoke-WebRequest -Uri $pythonUrl -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList `
-            "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_launcher=1" `
-            -Wait
-          Remove-Item $installer -Force
-          python --version
-          Write-Host "==> Python installed."
-
-      #######################################################################
-      # INSTALL VS CODE PORTABLE TO DESKTOP
-      #######################################################################
-      - name: Install VS Code Portable to Desktop
-        run: |
-          Write-Host "==> Downloading VS Code Portable..."
-          $url = "https://update.code.visualstudio.com/latest/win32-x64-archive/stable"
-          $zipPath = "$env:TEMP\vscode.zip"
-          $desktopVS = "C:\Users\rdpadmin\Desktop\VSCode"
-          Invoke-WebRequest -Uri $url -OutFile $zipPath
-          Write-Host "==> Extracting VS Code Portable..."
-          Expand-Archive -Path $zipPath -DestinationPath $desktopVS -Force
-          Remove-Item $zipPath -Force
-          Write-Host "==> VS Code Portable ready on Desktop."
-
-      #######################################################################
-      # CREATE SHORTCUTS ON DESKTOP
-      #######################################################################
-      - name: Create Desktop Shortcuts
-        run: |
-          Write-Host "==> Creating shortcuts..."
-          $desktop = "C:\Users\rdpadmin\Desktop"
-          $WshShell = New-Object -ComObject WScript.Shell
-
-          # Python Shortcut
-          $py = $WshShell.CreateShortcut("$desktop\Python 3.13.3.lnk")
-          $py.TargetPath = "C:\Program Files\Python313\python.exe"
-          $py.Save()
-
-          # VS Code Shortcut
-          $vs = $WshShell.CreateShortcut("$desktop\VS Code.lnk")
-          $vs.TargetPath = "C:\Users\rdpadmin\Desktop\VSCode\Code.exe"
-          $vs.Save()
-          Write-Host "==> Shortcuts created."
-
-      #######################################################################
-      # KEEP RDP SESSION ACTIVE
-      #######################################################################
+          # Variables
+          $downloadUrl = "https://github.com/Zaiinalii/RDP/releases/download/v1/sOFTWARES.rar"
+          $downloadPath = Join-Path $env:TEMP "sOFTWARES.rar"
+          $extractPath = Join-Path $env:TEMP "sOFTWARES_extracted"
+          $desktopPath = Join-Path $env:USERPROFILE "Desktop"
+          try {
+            # Download the RAR
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing -ErrorAction Stop
+            # Ensure 7-Zip is installed (check both Program Files locations)
+            $sevenZipCandidates = @("C:\Program Files\7-Zip\7z.exe", "C:\Program Files (x86)\7-Zip\7z.exe")
+            $sevenZipExe = $sevenZipCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $sevenZipExe) {
+              choco install 7zip -y
+              # Re-evaluate path after install
+              $sevenZipExe = $sevenZipCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            }
+            if (-not $sevenZipExe) {
+              Write-Error "7-Zip not found or failed to install."
+              exit 1
+            }
+            # Prepare extraction folder
+            if (Test-Path $extractPath) { Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+            # Extract the RAR (use 7z)
+            & "$sevenZipExe" x "$downloadPath" "-o$extractPath" -y
+            # Copy all extracted content (files and folders) to Desktop
+            # Use Get-ChildItem to ensure items are copied individually preserving folder structure
+            Get-ChildItem -Path $extractPath -Force | ForEach-Object {
+              $dest = Join-Path $desktopPath $_.Name
+              if ($_.PSIsContainer) {
+                Copy-Item -Path $_.FullName -Destination $dest -Recurse -Force -ErrorAction Stop
+              } else {
+                Copy-Item -Path $_.FullName -Destination $desktopPath -Force -ErrorAction Stop
+              }
+            }
+            # Clean up downloaded archive and temporary extraction folder
+            Remove-Item $downloadPath -Force -ErrorAction SilentlyContinue
+            Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "sOFTWARES downloaded, extracted, and all contents copied to Desktop."
+          } catch {
+            Write-Error "Failed to download/extract/copy sOFTWARES: $_"
+            exit 1
+          }
       - name: Maintain RDP Connection
         run: |
-          Write-Host "=== RDP ACCESS ==="
-          Write-Host "IP: $env:TAILSCALE_IP"
-          Write-Host "Username: $env:RDP_USER"
-          Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "=================="
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: Administrator"
+          Write-Host "Password: $env:RDP_CREDS"
+          Write-Host "==================`n"
+          # Keep runner active indefinitely (or until manually canceled)
           while ($true) {
-            Write-Host "[KEEP-ALIVE] $(Get-Date)"
-            Start-Sleep 300
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C to terminate"
+              Start-Sleep -Seconds 300
           }
