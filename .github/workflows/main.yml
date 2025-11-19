@@ -46,20 +46,18 @@ jobs:
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
       #######################################################################
-      # FORCE CREATE USER PROFILE + DESKTOP
+      # PREPARE DESKTOP FOLDER
       #######################################################################
-      - name: Force Create User Profile and Desktop
+      - name: Prepare Desktop Folder for rdpadmin
         run: |
           $user = "rdpadmin"
-          $userProfile = "C:\Users\$user"
+          $profile = "C:\Users\$user"
+          $desktop = "$profile\Desktop"
 
-          if (-not (Test-Path $userProfile)) {
-            Write-Host "Forcing Windows to create profile..."
-            runas /user:$user "cmd /c exit" 2>$null
-            Start-Sleep -Seconds 5
+          if (-not (Test-Path $profile)) {
+            New-Item -ItemType Directory -Path $profile | Out-Null
           }
 
-          $desktop = "$userProfile\Desktop"
           if (-not (Test-Path $desktop)) {
             New-Item -ItemType Directory -Path $desktop | Out-Null
           }
@@ -98,7 +96,7 @@ jobs:
           Write-Host "RDP port is open."
 
       #######################################################################
-      # DOWNLOAD SOFTWARE → PLACE ON DESKTOP
+      # DOWNLOAD AND EXTRACT SOFTWARES TO DESKTOP
       #######################################################################
       - name: Download and Extract SOFTWARES
         run: |
@@ -140,20 +138,20 @@ jobs:
           python --version
 
       #######################################################################
-      # INSTALL VS CODE → ON DESKTOP
+      # INSTALL VS CODE PORTABLE TO DESKTOP
       #######################################################################
       - name: Install VS Code Portable to Desktop
         run: |
           $url = "https://update.code.visualstudio.com/latest/win32-x64-archive/stable"
           $zipPath = "$env:TEMP\vscode.zip"
-          $desktop = "C:\Users\rdpadmin\Desktop\VSCode"
+          $desktopVS = "C:\Users\rdpadmin\Desktop\VSCode"
 
           Invoke-WebRequest -Uri $url -OutFile $zipPath
-          Expand-Archive -Path $zipPath -DestinationPath $desktop -Force
+          Expand-Archive -Path $zipPath -DestinationPath $desktopVS -Force
           Remove-Item $zipPath -Force
 
       #######################################################################
-      # CREATE SHORTCUTS
+      # CREATE SHORTCUTS ON DESKTOP
       #######################################################################
       - name: Create Desktop Shortcuts
         run: |
@@ -171,7 +169,7 @@ jobs:
           $vs.Save()
 
       #######################################################################
-      # KEEP RDP SESSION
+      # KEEP RDP SESSION ACTIVE
       #######################################################################
       - name: Maintain RDP Connection
         run: |
