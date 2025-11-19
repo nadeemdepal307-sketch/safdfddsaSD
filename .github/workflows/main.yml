@@ -46,15 +46,14 @@ jobs:
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
       #######################################################################
-      # PRE-CREATE RDP PROFILE (so Desktop exists)
+      # CREATE DESKTOP FOLDER FOR rdpadmin
       #######################################################################
-      - name: Pre-create rdpadmin profile
+      - name: Create Desktop Folder
         run: |
-          $user = "rdpadmin"
-          $pass = "Zain.rty123"
-          Start-Process -FilePath "C:\Windows\System32\runas.exe" `
-            -ArgumentList "/user:$user `"cmd /c exit`"" `
-            -Wait
+          $profile = "C:\Users\rdpadmin"
+          $desktop = "$profile\Desktop"
+          if (-not (Test-Path $profile)) { New-Item -ItemType Directory -Path $profile | Out-Null }
+          if (-not (Test-Path $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }
 
       #######################################################################
       # INSTALL TAILSCALE
@@ -98,8 +97,6 @@ jobs:
           $downloadPath = "$env:TEMP\sOFTWARES.rar"
           $extractPath = "$env:TEMP\sOFTWARES_extracted"
           $desktop = "C:\Users\rdpadmin\Desktop"
-
-          if (!(Test-Path $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }
 
           Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
 
