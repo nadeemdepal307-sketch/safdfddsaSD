@@ -21,13 +21,11 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-
           Restart-Service -Name TermService -Force
 
       #######################################################################
-      # CREATE WORKING ADMIN USER FOR RDP
+      # CREATE RDP USER
       #######################################################################
       - name: Create RDP User
         run: |
@@ -46,6 +44,17 @@ jobs:
 
           echo "RDP_USER=$username" >> $env:GITHUB_ENV
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
+
+      #######################################################################
+      # PRE-CREATE RDP PROFILE (so Desktop exists)
+      #######################################################################
+      - name: Pre-create rdpadmin profile
+        run: |
+          $user = "rdpadmin"
+          $pass = "Zain.rty123"
+          Start-Process -FilePath "C:\Windows\System32\runas.exe" `
+            -ArgumentList "/user:$user `"cmd /c exit`"" `
+            -Wait
 
       #######################################################################
       # INSTALL TAILSCALE
@@ -81,14 +90,16 @@ jobs:
           Write-Host "RDP port is open."
 
       #######################################################################
-      # DOWNLOAD, EXTRACT AND COPY SOFTWARES TO DESKTOP
+      # DOWNLOAD AND EXTRACT SOFTWARES TO RDP DESKTOP
       #######################################################################
       - name: Download and Extract SOFTWARES
         run: |
           $downloadUrl = "https://github.com/Zaiinalii/RDP/releases/download/v1/sOFTWARES.rar"
           $downloadPath = "$env:TEMP\sOFTWARES.rar"
           $extractPath = "$env:TEMP\sOFTWARES_extracted"
-          $desktopPath = "C:\Users\rdpadmin\Desktop"
+          $desktop = "C:\Users\rdpadmin\Desktop"
+
+          if (!(Test-Path $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }
 
           Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
 
@@ -103,7 +114,7 @@ jobs:
           New-Item -ItemType Directory -Path $extractPath | Out-Null
 
           & $sevenZip x $downloadPath "-o$extractPath" -y
-          Copy-Item "$extractPath\*" $desktopPath -Recurse -Force
+          Copy-Item "$extractPath\*" $desktop -Recurse -Force
 
           Remove-Item $downloadPath -Force
           Remove-Item $extractPath -Recurse -Force
@@ -115,7 +126,6 @@ jobs:
         run: |
           $pythonUrl = "https://www.python.org/ftp/python/3.13.3/python-3.13.3-amd64.exe"
           $installer = "$env:TEMP\python3133.exe"
-
           Invoke-WebRequest -Uri $pythonUrl -OutFile $installer
           Start-Process -FilePath $installer -ArgumentList `
             "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_launcher=1" `
