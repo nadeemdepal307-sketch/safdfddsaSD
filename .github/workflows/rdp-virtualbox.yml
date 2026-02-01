@@ -1,0 +1,105 @@
+name: VirtualBox VM Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-vm:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Download VirtualBox and OVA
+        run: |
+          $dest = "C:\Users\Administrator\Desktop\Public"
+          if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
+
+          Write-Host "Downloading OVA..."
+          Invoke-WebRequest `
+            -Uri "https://pub-4e3db5ccea8a4f30ae7d4ee15e71f566.r2.dev/Nadeem.ova" `
+            -OutFile "$dest\Nadeem.ova" `
+            -UseBasicParsing
+
+          Write-Host "Downloading VirtualBox installer..."
+          Invoke-WebRequest `
+            -Uri "https://download.virtualbox.org/virtualbox/7.2.4/VirtualBox-7.2.4-170995-Win.exe" `
+            -OutFile "$dest\VirtualBox-7.2.4-170995-Win.exe" `
+            -UseBasicParsing
+
+      - name: Install VirtualBox Silently
+        run: |
+          $vbInstaller = "C:\Users\Administrator\Desktop\Public\VirtualBox-7.2.4-170995-Win.exe"
+          Start-Process -FilePath $vbInstaller -ArgumentList "--silent --msiparams ALLUSERS=2" -Wait
+          
+          # Wait for VirtualBox to fully install
+          Start-Sleep -Seconds 10
+          
+          # Verify installation
+          $vboxManage = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+          if (Test-Path $vboxManage) {
+              Write-Host "✅ VirtualBox installed successfully!"
+              & $vboxManage --version
+          } else {
+              Write-Error "❌ VirtualBox installation failed!"
+              exit 1
+          }
+
+      - name: Import and Start OVA VM
+        run: |
+          $vboxManage = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+          $ovaPath = "C:\Users\Administrator\Desktop\Public\Nadeem.ova"
+          $vmName = "Nadeem"
+          
+          Write-Host "📦 Importing OVA: $ovaPath"
+          Write-Host "This may take a few minutes..."
+          
+          # Import the OVA
+          & $vboxManage import $ovaPath --vsys 0 --vmname $vmName
+          
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "❌ Failed to import OVA!"
+              exit 1
+          }
+          
+          Write-Host "✅ OVA imported successfully!"
+          
+          # List VMs to verify
+          Write-Host "`n📋 Available VMs:"
+          & $vboxManage list vms
+          
+          # Start the VM in headless mode (no GUI window needed)
+          Write-Host "`n🚀 Starting VM '$vmName' in headless mode..."
+          & $vboxManage startvm $vmName --type headless
+          
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "❌ Failed to start VM!"
+              exit 1
+          }
+          
+          Write-Host "✅ VM '$vmName' started successfully!"
+          
+          # Wait for VM to boot
+          Write-Host "⏳ Waiting 60 seconds for VM to boot..."
+          Start-Sleep -Seconds 60
+          
+          # Show VM info
+          Write-Host "`n📊 VM Status:"
+          & $vboxManage showvminfo $vmName --machinereadable | Select-String -Pattern "VMState|memory|cpus"
+
+      - name: Keep VM Running
+        run: |
+          Write-Host "`n=========================================="
+          Write-Host "    ✅ VM 'Nadeem' is running!"
+          Write-Host "=========================================="
+          Write-Host "The scraper inside the VM should be running automatically."
+          Write-Host "Check GitHub repo for logs and scraped data."
+          Write-Host "==========================================`n"
+          
+          while ($true) {
+              $vmStatus = & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" showvminfo "Nadeem" --machinereadable 2>$null | Select-String "VMState="
+              Write-Host "[$(Get-Date)] VM Status: $vmStatus"
+              Start-Sleep -Seconds 300
+          }
